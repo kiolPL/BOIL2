@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Solver problemu transportowego</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="toolbar" aria-label="Panel konfiguracji">
+        <div>
+          <h1>Solver transportowy</h1>
+        </div>
+        <div class="toolbar-actions">
+          <div class="segmented" role="tablist" aria-label="Tryb zadania">
+            <button class="mode-button is-active" data-mode="transport" type="button">Transport</button>
+            <button class="mode-button" data-mode="intermediary" type="button">Posrednik</button>
+          </div>
+          <button id="exampleButton" class="secondary-button" type="button">Przyklad</button>
+          <button id="solveButton" class="primary-button" type="button">Przelicz</button>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel config-panel" aria-label="Dane wejsciowe">
+          <div class="section-heading">
+            <h2>Dane</h2>
+            <span id="balanceStatus" class="status-chip">Gotowe</span>
+          </div>
+          <div id="sizeControls" class="size-controls"></div>
+          <div id="nameControls" class="name-grid"></div>
+        </aside>
+
+        <section class="main-column">
+          <section class="panel matrix-panel" aria-label="Macierze kosztow">
+            <div class="section-heading">
+              <h2>Koszty, przychody i blokady</h2>
+              <span class="muted">maks. 10 x 10</span>
+            </div>
+            <div id="matrixEditors" class="matrix-editors"></div>
+          </section>
+
+          <section class="panel result-panel" aria-label="Wyniki">
+            <div class="section-heading">
+              <h2>Wyniki</h2>
+              <span id="resultStatus" class="status-chip">Brak obliczen</span>
+            </div>
+            <div id="results" class="results-empty">
+              Wprowadz dane i uruchom obliczenia.
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="/src/app.js"></script>
+  </body>
+</html>
