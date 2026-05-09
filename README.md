@@ -27,10 +27,6 @@ Widok po wylaczeniu liczenia zysku:
 
 ![Widok bez liczenia zysku](screenshots/transport-profit-disabled.png)
 
-Widok mobilny:
-
-![Widok mobilny](screenshots/transport-profit-disabled-mobile.png)
-
 ## Uruchomienie
 
 ```powershell
