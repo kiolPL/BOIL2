@@ -111,31 +111,78 @@ class TransportSolverTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["allocations"], [[0, 5], [5, 0]])
 
-    def test_intermediary_uses_cheapest_available_path(self):
+    def test_intermediary_maximizes_profit_from_purchase_sale_and_transport(self):
         result = solve_transport_problem(
             {
                 "mode": "intermediary",
-                "supplierCount": 1,
-                "receiverCount": 1,
-                "intermediaryCount": 2,
-                "supplierNames": ["D1"],
-                "receiverNames": ["O1"],
-                "intermediaryNames": ["P1", "P2"],
-                "supply": [12],
-                "demand": [12],
-                "supplierToIntermediaryCosts": [[6, 2]],
-                "supplierToIntermediaryBlocked": [[False, False]],
-                "intermediaryToReceiverCosts": [[1], [5]],
-                "intermediaryToReceiverBlocked": [[False], [False]],
-                "revenues": [[12]],
+                "supplierCount": 2,
+                "receiverCount": 3,
+                "supplierNames": ["D1", "D2"],
+                "receiverNames": ["O1", "O2", "O3"],
+                "supply": [20, 30],
+                "demand": [10, 28, 27],
+                "purchaseCosts": [10, 12],
+                "salePrices": [30, 25, 30],
+                "costs": [[8, 14, 17], [12, 9, 19]],
+                "blocked": [[False, False, False], [False, False, False]],
             }
         )
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["paths"][0][0]["intermediaryName"], "P1")
-        self.assertEqual(result["totalCost"], 84)
-        self.assertEqual(result["totalRevenue"], 144)
-        self.assertEqual(result["totalProfit"], 60)
+        self.assertEqual(result["allocations"], [[10, 0, 10], [0, 28, 0]])
+        self.assertEqual(result["totalCost"], 1038)
+        self.assertEqual(result["totalRevenue"], 1300)
+        self.assertEqual(result["totalProfit"], 262)
+        self.assertEqual(result["unitProfits"], [[12, 1, 3], [6, 4, -1]])
+        self.assertEqual(result["iterations"][0]["unitProfit"], 12)
+        self.assertEqual(result["routeSummary"][0]["profit"], 120)
+
+    def test_intermediary_respects_blocked_transport_routes(self):
+        result = solve_transport_problem(
+            {
+                "mode": "intermediary",
+                "supplierCount": 2,
+                "receiverCount": 2,
+                "supplierNames": ["D1", "D2"],
+                "receiverNames": ["O1", "O2"],
+                "supply": [10, 10],
+                "demand": [10, 10],
+                "purchaseCosts": [4, 4],
+                "salePrices": [20, 20],
+                "costs": [[1, 2], [9, 3]],
+                "blocked": [[True, False], [False, False]],
+            }
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["allocations"], [[0, 10], [10, 0]])
+
+    def test_intermediary_can_force_full_demand_for_selected_receiver(self):
+        result = solve_transport_problem(
+            {
+                "mode": "intermediary",
+                "forceReceiverDemand": True,
+                "requiredReceiverIndex": 2,
+                "supplierCount": 2,
+                "receiverCount": 3,
+                "supplierNames": ["D1", "D2"],
+                "receiverNames": ["O1", "O2", "O3"],
+                "supply": [20, 30],
+                "demand": [10, 28, 27],
+                "purchaseCosts": [10, 12],
+                "salePrices": [30, 25, 30],
+                "costs": [[8, 14, 17], [12, 9, 19]],
+                "blocked": [[False, False, False], [False, False, False]],
+            }
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["allocations"], [[10, 0, 10], [0, 13, 17]])
+        self.assertEqual(result["totalCost"], 1250)
+        self.assertEqual(result["totalRevenue"], 1435)
+        self.assertEqual(result["totalProfit"], 185)
+        self.assertTrue(result["forceReceiverDemand"])
+        self.assertEqual(result["requiredReceiverIndex"], 2)
 
     def test_infeasible_when_all_routes_blocked(self):
         result = solve_transport_problem(

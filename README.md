@@ -1,11 +1,13 @@
 # Solver problemu transportowego
 
-Prosty program do liczenia zadan transportowych. Aplikacja wyznacza plan dostaw
+Prosty program do liczenia problemow transportowych. Aplikacja wyznacza plan dostaw
 metoda wierzcholka polnocno-zachodniego, pokazuje kolejne kroki na grafach i
 pozwala blokowac trasy, ktore nie moga byc uzyte.
 
-Jest tez tryb posrednika. W tym wariancie trasa idzie przez punkt posredni, a
-program wybiera najtansze dostepne przejscie dostawca -> posrednik -> odbiorca.
+Jest tez tryb posrednika. W tym wariancie podaje sie koszt zakupu u dostawcy,
+cene sprzedazy u odbiorcy oraz koszt transportu na trasie dostawca -> odbiorca.
+Program wybiera plan o najwiekszym zysku i pozwala wymusic pelny popyt wybranego
+odbiorcy.
 
 ## Co jest w srodku
 
@@ -13,7 +15,8 @@ program wybiera najtansze dostepne przejscie dostawca -> posrednik -> odbiorca.
 - edycja dostawcow, odbiorcow, podazy i popytu,
 - koszty transportu oraz opcjonalne liczenie przychodu i zysku,
 - blokowanie tras w zwyklym problemie transportowym,
-- blokowanie odcinkow dostawca-posrednik i posrednik-odbiorca,
+- blokowanie tras dostawca-odbiorca w trybie posrednika,
+- wymuszenie pelnego popytu wybranego odbiorcy w trybie posrednika,
 - automatyczne bilansowanie przez dostawce albo odbiorce fikcyjnego,
 - tabela wyniku koncowego oraz graf dla kazdej iteracji.
 
@@ -26,6 +29,10 @@ Widok z wlaczonym zyskiem:
 Widok po wylaczeniu liczenia zysku:
 
 ![Widok bez liczenia zysku](screenshots/transport-profit-disabled.png)
+
+Tryb posrednika:
+
+![Tryb posrednika](screenshots/intermediary-profit.png)
 
 ## Uruchomienie
 

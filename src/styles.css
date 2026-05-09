@@ -35,7 +35,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -234,7 +235,8 @@ h1 {
   text-transform: uppercase;
 }
 
-.field input {
+.field input,
+.constraint-row select {
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
@@ -245,7 +247,8 @@ h1 {
 }
 
 .field input:focus,
-.matrix-input:focus {
+.matrix-input:focus,
+.constraint-row select:focus {
   border-color: var(--accent);
   outline: 2px solid rgba(8, 127, 114, 0.15);
 }
@@ -271,10 +274,47 @@ h1 {
   accent-color: var(--accent);
 }
 
+.constraint-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 0.7fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.constraint-row label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.constraint-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.constraint-row select:disabled {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
 .person-row {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(82px, 0.75fr);
   gap: 8px;
+}
+
+.person-row.three-fields {
+  grid-template-columns: minmax(0, 1.15fr) minmax(78px, 0.65fr) minmax(96px, 0.75fr);
 }
 
 .matrix-editors {
@@ -629,11 +669,13 @@ th {
   }
 
   .size-controls,
-  .summary-grid {
+  .summary-grid,
+  .constraint-row {
     grid-template-columns: 1fr;
   }
 
-  .person-row {
+  .person-row,
+  .person-row.three-fields {
     grid-template-columns: 1fr;
   }
 

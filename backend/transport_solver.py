@@ -13,6 +13,15 @@ class SolverError(ValueError):
     """Input data cannot form a valid transport task."""
 
 
+class _FlowEdge:
+    def __init__(self, to_node: int, reverse_index: int, capacity: float, cost: float) -> None:
+        self.to_node = to_node
+        self.reverse_index = reverse_index
+        self.capacity = capacity
+        self.initial_capacity = capacity
+        self.cost = cost
+
+
 def _as_float(value: Any, field: str) -> float:
     try:
         number = float(value)
@@ -100,10 +109,19 @@ def solve_transport_problem(payload: dict[str, Any]) -> dict[str, Any]:
     _validate_positive_total(supply, "podaz")
     _validate_positive_total(demand, "popyt")
     profit_enabled = payload.get("calculateProfit", True) is not False
-    revenue_payload = payload.get("revenues", []) if profit_enabled else []
-    revenues = _matrix(revenue_payload, supplier_count, receiver_count, "przychod", 0.0)
+    force_receiver_demand = mode == "intermediary" and profit_enabled and payload.get("forceReceiverDemand") is True
+    required_receiver_index: int | None = None
+    if force_receiver_demand:
+        try:
+            required_receiver_index = int(payload.get("requiredReceiverIndex", receiver_count - 1))
+        except (TypeError, ValueError) as exc:
+            raise SolverError("Wybrany odbiorca do wymuszenia popytu jest niepoprawny.") from exc
+        if required_receiver_index < 0 or required_receiver_index >= receiver_count:
+            raise SolverError("Wybrany odbiorca do wymuszenia popytu jest poza zakresem.")
 
     if mode == "transport":
+        revenue_payload = payload.get("revenues", []) if profit_enabled else []
+        revenues = _matrix(revenue_payload, supplier_count, receiver_count, "przychod", 0.0)
         costs = _matrix(payload.get("costs", []), supplier_count, receiver_count, "koszt", 0.0)
         blocked = _bool_matrix(payload.get("blocked", []), supplier_count, receiver_count)
         path_matrix = [
@@ -120,62 +138,61 @@ def solve_transport_problem(payload: dict[str, Any]) -> dict[str, Any]:
         intermediary_names: list[str] = []
         segment_data: dict[str, Any] = {}
     else:
-        intermediary_count = int(payload.get("intermediaryCount") or len(payload.get("intermediaryNames", [])) or 1)
-        if not 1 <= intermediary_count <= MAX_SIZE:
-            raise SolverError(f"Liczba posrednikow musi byc od 1 do {MAX_SIZE}.")
-        intermediary_names = _normalize_names(payload.get("intermediaryNames", []), "P", intermediary_count)
-        supplier_to_intermediary = _matrix(
-            payload.get("supplierToIntermediaryCosts", []),
-            supplier_count,
-            intermediary_count,
-            "koszt_dostawca_posrednik",
-            0.0,
-        )
-        intermediary_to_receiver = _matrix(
-            payload.get("intermediaryToReceiverCosts", []),
-            intermediary_count,
-            receiver_count,
-            "koszt_posrednik_odbiorca",
-            0.0,
-        )
-        blocked_supplier_to_intermediary = _bool_matrix(
-            payload.get("supplierToIntermediaryBlocked", []),
-            supplier_count,
-            intermediary_count,
-        )
-        blocked_intermediary_to_receiver = _bool_matrix(
-            payload.get("intermediaryToReceiverBlocked", []),
-            intermediary_count,
-            receiver_count,
-        )
-        costs, blocked, path_matrix = _build_intermediary_matrix(
-            supplier_names,
-            receiver_names,
-            intermediary_names,
-            supplier_to_intermediary,
-            intermediary_to_receiver,
-            blocked_supplier_to_intermediary,
-            blocked_intermediary_to_receiver,
-        )
+        purchase_costs = _vector(payload.get("purchaseCosts", []), supplier_count, "koszt_zakupu")
+        sale_prices = _vector(payload.get("salePrices", []), receiver_count, "cena_sprzedazy")
+        transport_costs = _matrix(payload.get("costs", []), supplier_count, receiver_count, "koszt_transportu", 0.0)
+        blocked = _bool_matrix(payload.get("blocked", []), supplier_count, receiver_count)
+        costs = [
+            [purchase_costs[i] + transport_costs[i][j] for j in range(receiver_count)]
+            for i in range(supplier_count)
+        ]
+        revenues = [[sale_prices[j] for j in range(receiver_count)] for _ in range(supplier_count)]
+        path_matrix = [
+            [
+                {
+                    "type": "intermediary",
+                    "label": f"{supplier_names[i]} -> {receiver_names[j]}",
+                    "purchaseCost": _format_number(purchase_costs[i]),
+                    "transportCost": _format_number(transport_costs[i][j]),
+                    "salePrice": _format_number(sale_prices[j]),
+                    "cost": _format_number(costs[i][j]),
+                    "unitProfit": _format_number(revenues[i][j] - costs[i][j]),
+                }
+                for j in range(receiver_count)
+            ]
+            for i in range(supplier_count)
+        ]
+        intermediary_names = []
         segment_data = {
-            "supplierToIntermediaryCosts": _clone_numeric_matrix(supplier_to_intermediary),
-            "intermediaryToReceiverCosts": _clone_numeric_matrix(intermediary_to_receiver),
-            "supplierToIntermediaryBlocked": blocked_supplier_to_intermediary,
-            "intermediaryToReceiverBlocked": blocked_intermediary_to_receiver,
+            "purchaseCosts": _clone_vector(purchase_costs),
+            "salePrices": _clone_vector(sale_prices),
+            "transportCosts": _clone_numeric_matrix(transport_costs),
         }
 
-    balanced = _balance_problem(
-        supply,
-        demand,
-        supplier_names,
-        receiver_names,
-        costs,
-        revenues,
-        blocked,
-        path_matrix,
-        mode,
-    )
-    solution = _northwest_corner_with_blocks(supply, demand, costs, revenues, blocked, path_matrix, profit_enabled)
+    if mode == "intermediary" and profit_enabled:
+        balanced = _open_profit_status(supply, demand)
+        solution = _maximum_profit_with_blocks(
+            supply,
+            demand,
+            costs,
+            revenues,
+            blocked,
+            path_matrix,
+            required_receiver_index,
+        )
+    else:
+        balanced = _balance_problem(
+            supply,
+            demand,
+            supplier_names,
+            receiver_names,
+            costs,
+            revenues,
+            blocked,
+            path_matrix,
+            mode,
+        )
+        solution = _northwest_corner_with_blocks(supply, demand, costs, revenues, blocked, path_matrix, profit_enabled)
 
     route_summary = _route_summary(
         solution["allocations"],
@@ -201,9 +218,12 @@ def solve_transport_problem(payload: dict[str, Any]) -> dict[str, Any]:
         "demand": _clone_vector(demand),
         "costs": _clone_numeric_matrix(costs),
         "revenues": _clone_numeric_matrix(revenues),
+        "unitProfits": _clone_numeric_matrix(_profit_matrix(costs, revenues)) if profit_enabled else None,
         "blocked": blocked,
         "paths": path_matrix,
         "segments": segment_data,
+        "forceReceiverDemand": force_receiver_demand,
+        "requiredReceiverIndex": required_receiver_index,
         "iterations": solution["iterations"],
         "allocations": _clone_numeric_matrix(solution["allocations"]),
         "totalCost": _format_number(solution["total_cost"]),
@@ -211,68 +231,6 @@ def solve_transport_problem(payload: dict[str, Any]) -> dict[str, Any]:
         "totalProfit": _format_number(solution["total_profit"]) if profit_enabled else None,
         "routeSummary": route_summary,
     }
-
-
-def _build_intermediary_matrix(
-    supplier_names: list[str],
-    receiver_names: list[str],
-    intermediary_names: list[str],
-    supplier_to_intermediary: list[list[float]],
-    intermediary_to_receiver: list[list[float]],
-    blocked_supplier_to_intermediary: list[list[bool]],
-    blocked_intermediary_to_receiver: list[list[bool]],
-) -> tuple[list[list[float]], list[list[bool]], list[list[dict[str, Any]]]]:
-    costs: list[list[float]] = []
-    blocked: list[list[bool]] = []
-    paths: list[list[dict[str, Any]]] = []
-
-    for supplier_index, supplier_name in enumerate(supplier_names):
-        cost_row: list[float] = []
-        blocked_row: list[bool] = []
-        path_row: list[dict[str, Any]] = []
-        for receiver_index, receiver_name in enumerate(receiver_names):
-            best: tuple[float, int] | None = None
-            for intermediary_index, intermediary_name in enumerate(intermediary_names):
-                if blocked_supplier_to_intermediary[supplier_index][intermediary_index]:
-                    continue
-                if blocked_intermediary_to_receiver[intermediary_index][receiver_index]:
-                    continue
-                combined = (
-                    supplier_to_intermediary[supplier_index][intermediary_index]
-                    + intermediary_to_receiver[intermediary_index][receiver_index]
-                )
-                if best is None or combined < best[0] - EPS:
-                    best = (combined, intermediary_index)
-
-            if best is None:
-                cost_row.append(0.0)
-                blocked_row.append(True)
-                path_row.append(
-                    {
-                        "type": "blocked",
-                        "label": f"{supplier_name} -> {receiver_name}",
-                        "cost": None,
-                    }
-                )
-            else:
-                cost, intermediary_index = best
-                intermediary_name = intermediary_names[intermediary_index]
-                cost_row.append(cost)
-                blocked_row.append(False)
-                path_row.append(
-                    {
-                        "type": "intermediary",
-                        "intermediaryIndex": intermediary_index,
-                        "intermediaryName": intermediary_name,
-                        "label": f"{supplier_name} -> {intermediary_name} -> {receiver_name}",
-                        "cost": _format_number(cost),
-                    }
-                )
-        costs.append(cost_row)
-        blocked.append(blocked_row)
-        paths.append(path_row)
-
-    return costs, blocked, paths
 
 
 def _balance_problem(
@@ -345,6 +303,264 @@ def _balance_problem(
         "totalDemand": _format_number(sum(demand)),
         "mode": mode,
     }
+
+
+def _open_profit_status(supply: list[float], demand: list[float]) -> dict[str, Any]:
+    return {
+        "wasBalanced": abs(sum(supply) - sum(demand)) <= EPS,
+        "added": None,
+        "warnings": [],
+        "totalSupply": _format_number(sum(supply)),
+        "totalDemand": _format_number(sum(demand)),
+        "mode": "intermediary",
+    }
+
+
+def _maximum_profit_with_blocks(
+    supply: list[float],
+    demand: list[float],
+    costs: list[list[float]],
+    revenues: list[list[float]],
+    blocked: list[list[bool]],
+    paths: list[list[dict[str, Any]]],
+    required_receiver_index: int | None = None,
+) -> dict[str, Any]:
+    rows = len(supply)
+    cols = len(demand)
+    unit_profits = _profit_matrix(costs, revenues)
+    allocations = _optimized_profit_allocations(supply, demand, unit_profits, blocked, required_receiver_index)
+    if required_receiver_index is not None:
+        required_amount = sum(allocations[row][required_receiver_index] for row in range(rows))
+        if required_amount + EPS < demand[required_receiver_index]:
+            return {
+                "success": False,
+                "message": "Nie da sie zaspokoic pelnego popytu wybranego odbiorcy przy obecnych blokadach i podazy.",
+                "warnings": [],
+                "iterations": [],
+                "allocations": allocations,
+                "total_cost": _total_cost(allocations, costs),
+                "total_revenue": _total_revenue(allocations, revenues),
+                "total_profit": _total_profit(allocations, costs, revenues),
+            }
+
+    remaining_supply = [
+        max(0.0, supply[row] - sum(allocations[row][col] for col in range(cols)))
+        for row in range(rows)
+    ]
+    remaining_demand = [
+        max(0.0, demand[col] - sum(allocations[row][col] for row in range(rows)))
+        for col in range(cols)
+    ]
+    iterations = _iterations_from_allocations(supply, demand, allocations, costs, revenues, paths)
+
+    warnings: list[str] = []
+    if sum(remaining_supply) > EPS:
+        warnings.append("Czesc podazy zostala niewykorzystana, bo pozostale trasy nie zwiekszaja zysku.")
+    if sum(remaining_demand) > EPS:
+        warnings.append("Czesc popytu pozostala niezaspokojona w planie maksymalizacji zysku.")
+    if required_receiver_index is not None:
+        forced_negative = any(
+            allocations[row][required_receiver_index] > EPS
+            and unit_profits[row][required_receiver_index] < -EPS
+            for row in range(rows)
+        )
+        if forced_negative:
+            warnings.append("Wymuszony popyt odbiorcy wymagal uzycia trasy z ujemnym zyskiem jednostkowym.")
+
+    return {
+        "success": True,
+        "message": (
+            "Plan dostaw wyznaczony metoda maksymalizacji zysku z wymuszonym popytem odbiorcy."
+            if required_receiver_index is not None
+            else "Plan dostaw wyznaczony metoda maksymalizacji zysku."
+        ),
+        "warnings": warnings,
+        "iterations": iterations,
+        "allocations": allocations,
+        "total_cost": _total_cost(allocations, costs),
+        "total_revenue": _total_revenue(allocations, revenues),
+        "total_profit": _total_profit(allocations, costs, revenues),
+    }
+
+
+def _optimized_profit_allocations(
+    supply: list[float],
+    demand: list[float],
+    unit_profits: list[list[float]],
+    blocked: list[list[bool]],
+    required_receiver_index: int | None,
+) -> list[list[float]]:
+    rows = len(supply)
+    cols = len(demand)
+    total_supply = sum(supply)
+    if total_supply <= EPS:
+        return [[0.0 for _ in range(cols)] for _ in range(rows)]
+
+    max_abs_profit = max(
+        [abs(unit_profits[row][col]) for row in range(rows) for col in range(cols)] + [1.0]
+    )
+    required_bonus = (max_abs_profit + 1.0) * (total_supply + sum(demand) + 1.0)
+
+    source = 0
+    supplier_offset = 1
+    receiver_offset = supplier_offset + rows
+    dummy_receiver = receiver_offset + cols
+    sink = dummy_receiver + 1
+    graph: list[list[_FlowEdge]] = [[] for _ in range(sink + 1)]
+    route_edges: dict[tuple[int, int], _FlowEdge] = {}
+
+    for row, amount in enumerate(supply):
+        _add_flow_edge(graph, source, supplier_offset + row, amount, 0.0)
+
+    for row in range(rows):
+        for col in range(cols):
+            if blocked[row][col]:
+                continue
+            is_required_receiver = required_receiver_index is not None and col == required_receiver_index
+            if not is_required_receiver and unit_profits[row][col] <= EPS:
+                continue
+            adjusted_profit = unit_profits[row][col]
+            if is_required_receiver:
+                adjusted_profit += required_bonus
+            route_edges[(row, col)] = _add_flow_edge(
+                graph,
+                supplier_offset + row,
+                receiver_offset + col,
+                INF,
+                -adjusted_profit,
+            )
+        _add_flow_edge(graph, supplier_offset + row, dummy_receiver, INF, 0.0)
+
+    for col, amount in enumerate(demand):
+        _add_flow_edge(graph, receiver_offset + col, sink, amount, 0.0)
+    _add_flow_edge(graph, dummy_receiver, sink, total_supply, 0.0)
+
+    _min_cost_flow(graph, source, sink, total_supply)
+
+    allocations = [[0.0 for _ in range(cols)] for _ in range(rows)]
+    for (row, col), edge in route_edges.items():
+        flow = edge.initial_capacity - edge.capacity
+        allocations[row][col] = 0.0 if abs(flow) < EPS else flow
+    return allocations
+
+
+def _add_flow_edge(
+    graph: list[list[_FlowEdge]],
+    from_node: int,
+    to_node: int,
+    capacity: float,
+    cost: float,
+) -> _FlowEdge:
+    forward = _FlowEdge(to_node, len(graph[to_node]), capacity, cost)
+    reverse = _FlowEdge(from_node, len(graph[from_node]), 0.0, -cost)
+    graph[from_node].append(forward)
+    graph[to_node].append(reverse)
+    return forward
+
+
+def _min_cost_flow(graph: list[list[_FlowEdge]], source: int, sink: int, amount: float) -> None:
+    remaining = amount
+    node_count = len(graph)
+
+    while remaining > EPS:
+        distances = [float("inf") for _ in range(node_count)]
+        parent_node = [-1 for _ in range(node_count)]
+        parent_edge = [-1 for _ in range(node_count)]
+        in_queue = [False for _ in range(node_count)]
+
+        distances[source] = 0.0
+        queue: deque[int] = deque([source])
+        in_queue[source] = True
+
+        while queue:
+            node = queue.popleft()
+            in_queue[node] = False
+            for edge_index, edge in enumerate(graph[node]):
+                if edge.capacity <= EPS:
+                    continue
+                next_cost = distances[node] + edge.cost
+                if next_cost + EPS < distances[edge.to_node]:
+                    distances[edge.to_node] = next_cost
+                    parent_node[edge.to_node] = node
+                    parent_edge[edge.to_node] = edge_index
+                    if not in_queue[edge.to_node]:
+                        queue.append(edge.to_node)
+                        in_queue[edge.to_node] = True
+
+        if parent_node[sink] == -1:
+            return
+
+        flow = remaining
+        node = sink
+        while node != source:
+            edge = graph[parent_node[node]][parent_edge[node]]
+            flow = min(flow, edge.capacity)
+            node = parent_node[node]
+
+        node = sink
+        while node != source:
+            edge = graph[parent_node[node]][parent_edge[node]]
+            edge.capacity -= flow
+            graph[edge.to_node][edge.reverse_index].capacity += flow
+            node = parent_node[node]
+        remaining -= flow
+
+
+def _iterations_from_allocations(
+    supply: list[float],
+    demand: list[float],
+    allocations: list[list[float]],
+    costs: list[list[float]],
+    revenues: list[list[float]],
+    paths: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    rows = len(supply)
+    cols = len(demand)
+    remaining_supply = supply[:]
+    remaining_demand = demand[:]
+    running_allocations = [[0.0 for _ in range(cols)] for _ in range(rows)]
+    iterations: list[dict[str, Any]] = []
+    step = 1
+
+    for row in range(rows):
+        for col in range(cols):
+            amount = allocations[row][col]
+            if amount <= EPS:
+                continue
+            supply_before = remaining_supply[:]
+            demand_before = remaining_demand[:]
+            remaining_supply[row] = max(0.0, remaining_supply[row] - amount)
+            remaining_demand[col] = max(0.0, remaining_demand[col] - amount)
+            running_allocations[row][col] += amount
+            unit_profit = revenues[row][col] - costs[row][col]
+
+            iterations.append(
+                {
+                    "step": step,
+                    "supplierIndex": row,
+                    "receiverIndex": col,
+                    "amount": _format_number(amount),
+                    "unitCost": _format_number(costs[row][col]),
+                    "unitRevenue": _format_number(revenues[row][col]),
+                    "unitProfit": _format_number(unit_profit),
+                    "stepCost": _format_number(amount * costs[row][col]),
+                    "stepRevenue": _format_number(amount * revenues[row][col]),
+                    "stepProfit": _format_number(amount * unit_profit),
+                    "path": deepcopy(paths[row][col]),
+                    "supplyBefore": _clone_vector(supply_before),
+                    "demandBefore": _clone_vector(demand_before),
+                    "supplyAfter": _clone_vector(remaining_supply),
+                    "demandAfter": _clone_vector(remaining_demand),
+                    "allocations": _clone_numeric_matrix(running_allocations),
+                    "totalCostSoFar": _format_number(_total_cost(running_allocations, costs)),
+                    "totalRevenueSoFar": _format_number(_total_revenue(running_allocations, revenues)),
+                    "totalProfitSoFar": _format_number(_total_profit(running_allocations, costs, revenues)),
+                    "warning": "",
+                }
+            )
+            step += 1
+
+    return iterations
 
 
 def _northwest_corner_with_blocks(
@@ -489,6 +705,13 @@ def _total_revenue(allocations: list[list[float]], revenues: list[list[float]]) 
         for row in range(len(allocations))
         for col in range(len(revenues[row]))
     )
+
+
+def _profit_matrix(costs: list[list[float]], revenues: list[list[float]]) -> list[list[float]]:
+    return [
+        [revenues[row][col] - costs[row][col] for col in range(len(costs[row]))]
+        for row in range(len(costs))
+    ]
 
 
 def _total_profit(allocations: list[list[float]], costs: list[list[float]], revenues: list[list[float]]) -> float:

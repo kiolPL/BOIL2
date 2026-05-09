@@ -31,39 +31,25 @@ function createExample(mode) {
     return {
       mode,
       calculateProfit: true,
-      supplierCount: 3,
-      receiverCount: 4,
-      intermediaryCount: 2,
-      supplierNames: ["D1", "D2", "D3"],
-      receiverNames: ["O1", "O2", "O3", "O4"],
-      intermediaryNames: ["P1", "P2"],
-      supply: [20, 30, 25],
-      demand: [10, 25, 25, 15],
-      revenues: [
-        [15, 14, 18, 16],
-        [16, 17, 21, 15],
-        [20, 16, 22, 14],
+      supplierCount: 2,
+      receiverCount: 3,
+      supplierNames: ["D1", "D2"],
+      receiverNames: ["O1", "O2", "O3"],
+      supply: [20, 30],
+      demand: [10, 28, 27],
+      purchaseCosts: [10, 12],
+      salePrices: [30, 25, 30],
+      costs: [
+        [8, 14, 17],
+        [12, 9, 19],
       ],
-      costs: [],
-      blocked: [],
-      supplierToIntermediaryCosts: [
-        [4, 7],
-        [5, 3],
-        [8, 4],
+      blocked: [
+        [false, false, false],
+        [false, false, false],
       ],
-      supplierToIntermediaryBlocked: [
-        [false, false],
-        [false, false],
-        [true, false],
-      ],
-      intermediaryToReceiverCosts: [
-        [6, 4, 9, 8],
-        [7, 5, 3, 6],
-      ],
-      intermediaryToReceiverBlocked: [
-        [false, false, false, true],
-        [false, false, false, false],
-      ],
+      revenues: [],
+      forceReceiverDemand: false,
+      requiredReceiverIndex: 2,
     };
   }
 
@@ -72,12 +58,12 @@ function createExample(mode) {
     calculateProfit: true,
     supplierCount: 3,
     receiverCount: 4,
-    intermediaryCount: 2,
     supplierNames: ["D1", "D2", "D3"],
     receiverNames: ["O1", "O2", "O3", "O4"],
-    intermediaryNames: ["P1", "P2"],
     supply: [20, 30, 25],
     demand: [10, 25, 25, 15],
+    purchaseCosts: [10, 12, 14],
+    salePrices: [15, 14, 18, 16],
     revenues: [
       [15, 14, 18, 16],
       [16, 17, 21, 15],
@@ -93,24 +79,8 @@ function createExample(mode) {
       [false, true, false, false],
       [false, false, false, false],
     ],
-    supplierToIntermediaryCosts: [
-      [4, 7],
-      [5, 3],
-      [8, 4],
-    ],
-    supplierToIntermediaryBlocked: [
-      [false, false],
-      [false, false],
-      [true, false],
-    ],
-    intermediaryToReceiverCosts: [
-      [6, 4, 9, 8],
-      [7, 5, 3, 6],
-    ],
-    intermediaryToReceiverBlocked: [
-      [false, false, false, true],
-      [false, false, false, false],
-    ],
+    forceReceiverDemand: false,
+    requiredReceiverIndex: 0,
   };
 }
 
@@ -125,16 +95,6 @@ function render() {
 }
 
 function renderSizeControls() {
-  const intermediaryField =
-    state.mode === "intermediary"
-      ? fieldHtml("Posrednicy", state.intermediaryCount, {
-          type: "number",
-          min: 1,
-          max: MAX_SIZE,
-          data: `data-count="intermediaryCount"`,
-        })
-      : "";
-
   return `
     ${fieldHtml("Dostawcy", state.supplierCount, {
       type: "number",
@@ -148,88 +108,107 @@ function renderSizeControls() {
       max: MAX_SIZE,
       data: `data-count="receiverCount"`,
     })}
-    ${intermediaryField}
     <label class="toggle-row">
       <input type="checkbox" ${state.calculateProfit ? "checked" : ""} data-flag="calculateProfit" />
       <span>Licz zysk</span>
     </label>
+    ${state.mode === "intermediary" && state.calculateProfit ? forcedDemandHtml() : ""}
+  `;
+}
+
+function forcedDemandHtml() {
+  const selectedIndex = clamp(Number(state.requiredReceiverIndex) || 0, 0, state.receiverCount - 1);
+  return `
+    <div class="constraint-row">
+      <label>
+        <input type="checkbox" ${state.forceReceiverDemand ? "checked" : ""} data-flag="forceReceiverDemand" />
+        <span>Wymus pelny popyt</span>
+      </label>
+      <select data-select="requiredReceiverIndex" ${state.forceReceiverDemand ? "" : "disabled"}>
+        ${state.receiverNames
+          .map(
+            (name, index) => `
+              <option value="${index}" ${index === selectedIndex ? "selected" : ""}>${escapeHtml(name)}</option>
+            `,
+          )
+          .join("")}
+      </select>
+    </div>
   `;
 }
 
 function renderNameControls() {
+  const supplierRows = state.supplierNames
+    .map(
+      (name, index) => `
+        <div class="person-row ${state.mode === "intermediary" ? "three-fields" : ""}">
+          ${fieldHtml("Nazwa", name, {
+            data: `data-array="supplierNames" data-index="${index}"`,
+          })}
+          ${fieldHtml("Podaz", state.supply[index], {
+            type: "number",
+            min: 0,
+            data: `data-array="supply" data-index="${index}"`,
+          })}
+          ${
+            state.mode === "intermediary"
+              ? fieldHtml("Koszt zakupu", state.purchaseCosts[index], {
+                  type: "number",
+                  min: 0,
+                  data: `data-array="purchaseCosts" data-index="${index}"`,
+                })
+              : ""
+          }
+        </div>
+      `,
+    )
+    .join("");
+
+  const receiverRows = state.receiverNames
+    .map(
+      (name, index) => `
+        <div class="person-row ${state.mode === "intermediary" ? "three-fields" : ""}">
+          ${fieldHtml("Nazwa", name, {
+            data: `data-array="receiverNames" data-index="${index}"`,
+          })}
+          ${fieldHtml("Popyt", state.demand[index], {
+            type: "number",
+            min: 0,
+            data: `data-array="demand" data-index="${index}"`,
+          })}
+          ${
+            state.mode === "intermediary"
+              ? fieldHtml("Cena sprzedazy", state.salePrices[index], {
+                  type: "number",
+                  min: 0,
+                  data: `data-array="salePrices" data-index="${index}"`,
+                })
+              : ""
+          }
+        </div>
+      `,
+    )
+    .join("");
+
   return `
-    <div class="small-label">Dostawcy i podaz</div>
-    ${state.supplierNames
-      .map(
-        (name, index) => `
-          <div class="person-row">
-            ${fieldHtml("Nazwa", name, {
-              data: `data-array="supplierNames" data-index="${index}"`,
-            })}
-            ${fieldHtml("Podaz", state.supply[index], {
-              type: "number",
-              min: 0,
-              data: `data-array="supply" data-index="${index}"`,
-            })}
-          </div>
-        `,
-      )
-      .join("")}
+    <div class="small-label">${state.mode === "intermediary" ? "Dostawcy, podaz i zakup" : "Dostawcy i podaz"}</div>
+    ${supplierRows}
 
-    <div class="small-label">Odbiorcy i popyt</div>
-    ${state.receiverNames
-      .map(
-        (name, index) => `
-          <div class="person-row">
-            ${fieldHtml("Nazwa", name, {
-              data: `data-array="receiverNames" data-index="${index}"`,
-            })}
-            ${fieldHtml("Popyt", state.demand[index], {
-              type: "number",
-              min: 0,
-              data: `data-array="demand" data-index="${index}"`,
-            })}
-          </div>
-        `,
-      )
-      .join("")}
-
-    ${
-      state.mode === "intermediary"
-        ? `
-          <div class="small-label">Posrednicy</div>
-          ${state.intermediaryNames
-            .map((name, index) =>
-              fieldHtml("Nazwa", name, {
-                data: `data-array="intermediaryNames" data-index="${index}"`,
-              }),
-            )
-            .join("")}
-        `
-        : ""
-    }
+    <div class="small-label">${state.mode === "intermediary" ? "Odbiorcy, popyt i sprzedaz" : "Odbiorcy i popyt"}</div>
+    ${receiverRows}
   `;
 }
 
 function renderMatrixEditors() {
   if (state.mode === "intermediary") {
-    return `
-      ${matrixHtml({
-        title: "Dostawcy -> posrednicy",
-        rowNames: state.supplierNames,
-        colNames: state.intermediaryNames,
-        matrixKey: "supplierToIntermediaryCosts",
-        blockKey: "supplierToIntermediaryBlocked",
-      })}
-      ${matrixHtml({
-        title: "Posrednicy -> odbiorcy",
-        rowNames: state.intermediaryNames,
-        colNames: state.receiverNames,
-        matrixKey: "intermediaryToReceiverCosts",
-        blockKey: "intermediaryToReceiverBlocked",
-      })}
-      ${state.calculateProfit ? revenueMatrixHtml() : ""}
-    `;
+    return matrixHtml({
+      title: "Koszty transportu dostawcy -> odbiorcy",
+      rowNames: state.supplierNames,
+      colNames: state.receiverNames,
+      matrixKey: "costs",
+      blockKey: "blocked",
+      label: "koszt transportu / blokada",
+    });
   }
 
   return `
@@ -369,6 +348,12 @@ function handleInput(event) {
 
 function handleChange(event) {
   const input = event.target;
+  if (input instanceof HTMLSelectElement && input.dataset.select) {
+    state[input.dataset.select] = Number(input.value);
+    solve();
+    return;
+  }
+
   if (!(input instanceof HTMLInputElement)) return;
 
   if (input.dataset.flag) {
@@ -393,16 +378,17 @@ function handleChange(event) {
 function ensureShape() {
   resizeArray(state.supplierNames, state.supplierCount, (index) => `D${index + 1}`);
   resizeArray(state.receiverNames, state.receiverCount, (index) => `O${index + 1}`);
-  resizeArray(state.intermediaryNames, state.intermediaryCount, (index) => `P${index + 1}`);
   resizeArray(state.supply, state.supplierCount, () => 0);
   resizeArray(state.demand, state.receiverCount, () => 0);
+  resizeArray(state.purchaseCosts, state.supplierCount, () => 0);
+  resizeArray(state.salePrices, state.receiverCount, () => 0);
   resizeMatrix(state.costs, state.supplierCount, state.receiverCount, 0);
   resizeMatrix(state.revenues, state.supplierCount, state.receiverCount, 0);
   resizeMatrix(state.blocked, state.supplierCount, state.receiverCount, false);
-  resizeMatrix(state.supplierToIntermediaryCosts, state.supplierCount, state.intermediaryCount, 0);
-  resizeMatrix(state.supplierToIntermediaryBlocked, state.supplierCount, state.intermediaryCount, false);
-  resizeMatrix(state.intermediaryToReceiverCosts, state.intermediaryCount, state.receiverCount, 0);
-  resizeMatrix(state.intermediaryToReceiverBlocked, state.intermediaryCount, state.receiverCount, false);
+  if (typeof state.forceReceiverDemand !== "boolean") {
+    state.forceReceiverDemand = false;
+  }
+  state.requiredReceiverIndex = clamp(Number(state.requiredReceiverIndex) || 0, 0, state.receiverCount - 1);
 }
 
 function resizeArray(array, length, factory) {
@@ -593,9 +579,7 @@ function allocationTable(result, allocations, current = null) {
 }
 
 function graphSvg(result, iteration) {
-  return result.mode === "intermediary"
-    ? intermediaryGraphSvg(result, iteration)
-    : transportGraphSvg(result, iteration);
+  return transportGraphSvg(result, iteration);
 }
 
 function transportGraphSvg(result, iteration) {
@@ -629,90 +613,6 @@ function transportGraphSvg(result, iteration) {
       ${receivers.map((node) => graphNode(node, "O")).join("")}
     </svg>
   `;
-}
-
-function intermediaryGraphSvg(result, iteration) {
-  const width = 820;
-  const maxNodes = Math.max(
-    result.supplierNames.length,
-    result.intermediaryNames.length || 1,
-    result.receiverNames.length,
-  );
-  const height = Math.max(330, maxNodes * 62 + 80);
-  const suppliers = result.supplierNames.map((name, index) => ({
-    name,
-    x: 70,
-    y: spreadY(index, result.supplierNames.length, height),
-  }));
-  const intermediaries = result.intermediaryNames.map((name, index) => ({
-    name,
-    x: width / 2,
-    y: spreadY(index, result.intermediaryNames.length, height),
-  }));
-  const receivers = result.receiverNames.map((name, index) => ({
-    name,
-    x: width - 70,
-    y: spreadY(index, result.receiverNames.length, height),
-  }));
-  const aggregates = aggregateIntermediarySegments(result, iteration.allocations);
-  const currentPath = iteration.path || {};
-  const parts = [];
-
-  const s2mBlocked = result.segments.supplierToIntermediaryBlocked || [];
-  const m2rBlocked = result.segments.intermediaryToReceiverBlocked || [];
-
-  for (let row = 0; row < suppliers.length; row += 1) {
-    for (let mid = 0; mid < intermediaries.length; mid += 1) {
-      const amount = aggregates.s2m[`${row}-${mid}`] || 0;
-      const current = currentPath.type === "intermediary" && row === iteration.supplierIndex && mid === currentPath.intermediaryIndex;
-      parts.push(edgeLine(suppliers[row], intermediaries[mid], amount, current, s2mBlocked[row]?.[mid], ""));
-    }
-  }
-
-  for (let mid = 0; mid < intermediaries.length; mid += 1) {
-    for (let col = 0; col < receivers.length; col += 1) {
-      const amount = aggregates.m2r[`${mid}-${col}`] || 0;
-      const current = currentPath.type === "intermediary" && col === iteration.receiverIndex && mid === currentPath.intermediaryIndex;
-      parts.push(edgeLine(intermediaries[mid], receivers[col], amount, current, m2rBlocked[mid]?.[col], ""));
-    }
-  }
-
-  aggregates.direct.forEach(({ row, col, amount }) => {
-    const current = row === iteration.supplierIndex && col === iteration.receiverIndex;
-    parts.push(edgeLine(suppliers[row], receivers[col], amount, current, false, ""));
-  });
-
-  return `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Graf posrednika kroku ${iteration.step}">
-      ${parts.join("")}
-      ${suppliers.map((node) => graphNode(node, "D")).join("")}
-      ${intermediaries.map((node) => graphNode(node, "P")).join("")}
-      ${receivers.map((node) => graphNode(node, "O")).join("")}
-    </svg>
-  `;
-}
-
-function aggregateIntermediarySegments(result, allocations) {
-  const s2m = {};
-  const m2r = {};
-  const direct = [];
-
-  for (let row = 0; row < allocations.length; row += 1) {
-    for (let col = 0; col < allocations[row].length; col += 1) {
-      const amount = Number(allocations[row][col] || 0);
-      if (amount <= 0) continue;
-      const path = result.paths[row]?.[col];
-      if (path?.type === "intermediary") {
-        const mid = path.intermediaryIndex;
-        s2m[`${row}-${mid}`] = (s2m[`${row}-${mid}`] || 0) + amount;
-        m2r[`${mid}-${col}`] = (m2r[`${mid}-${col}`] || 0) + amount;
-      } else {
-        direct.push({ row, col, amount });
-      }
-    }
-  }
-
-  return { s2m, m2r, direct };
 }
 
 function edgeLine(from, to, amount, isCurrent, isBlocked, cost) {
